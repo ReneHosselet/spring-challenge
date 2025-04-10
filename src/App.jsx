@@ -6,7 +6,7 @@ import Blossom from './components/blossom'
 import Ground from './components/ground'
 import { Suspense, useEffect, useState } from 'react'
 import { Leva, useControls } from 'leva'
-import { DepthOfField, EffectComposer } from '@react-three/postprocessing'
+import { DepthOfField, EffectComposer, Vignette } from '@react-three/postprocessing'
 
 function App() {
   const amountOfBlossoms = 100
@@ -67,7 +67,11 @@ function App() {
             far={5}
           />
           <OrbitControls enablePan={false} enabled={false} enableZoom={false} />
+          {/* <OrbitControls enablePan={false} enabled={false} maxPolarAngle={Math.PI / 2 / 1.8} minPolarAngle={Math.PI / 2 / 1.8} enableZoom={false} /> */}
           <EffectComposer>
+            <Vignette
+              intensity={0.25}
+            />
             <DepthOfField
               focusDistance={focusDistance}  // Use the dynamic focus distance state
               focalLength={dofControls.focalLength}

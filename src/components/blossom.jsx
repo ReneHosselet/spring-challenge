@@ -9,8 +9,8 @@ import quotesData from './quotes.json'
 
 function Blossom({ amount = 10, highlightRadius = 5 }) {
     const { scene, raycaster, mouse, camera } = useThree()
-    const blossomGLTF = useGLTF('./models/sakura.glb')
-    const aoMap = useTexture('./AOMaps/AO.png')
+    const blossomGLTF = useGLTF('/models/sakura.glb')
+    const aoMap = useTexture('/AOMaps/AO.png')
     const waterMeshRef = useRef(null)
     const meshRef = useRef()
     const planeRef = useRef()
@@ -154,7 +154,23 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                     instanceColors[i * 3 + 1] = 1.0; // G
                     instanceColors[i * 3 + 2] = 1.0; // B
                 }
+                // Store original colors
+                if (!originalColors.current) {
+                    originalColors.current = new Float32Array(amount * 3);
+                    for (let i = 0; i < amount * 3; i++) {
+                        originalColors.current[i] = 1.0; // Default white color
+                    }
+                }
 
+                // Create hover colors (light pink for sakura blossoms)
+                if (!hoverColors.current) {
+                    hoverColors.current = new Float32Array(amount * 3);
+                    for (let i = 0; i < amount; i++) {
+                        hoverColors.current[i * 3] = 1.0;     // R (pink tint)
+                        hoverColors.current[i * 3 + 1] = 0.7; // G (reduced for pink)
+                        hoverColors.current[i * 3 + 2] = 0.8; // B (slight blue for pink)
+                    }
+                }
                 meshRef.current.instanceColor = new THREE.InstancedBufferAttribute(instanceColors, 3);
             }
             return;
@@ -297,7 +313,6 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
             // If this is a highlighted instance or the selected instance, make it larger
             const isHighlighted = highlightedIndices.includes(i);
             const isSelected = selectedBlossomIndex === i;
-
             if (isSelected) {
                 // Selected blossoms are larger and have a different color
                 dummy.scale.setScalar(originalScale * 1.5);
@@ -308,7 +323,7 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                     meshRef.current.instanceColor.array[i * 3 + 1] = 0.5;     // G
                     meshRef.current.instanceColor.array[i * 3 + 2] = 0.7;     // B
                 }
-            } else if (isHighlighted) {
+            } else if (isHighlighted && hoverColors.current) {
                 dummy.scale.setScalar(originalScale * 1.2); // 20% bigger when highlighted
 
                 // Update color if we have instance colors
@@ -317,7 +332,7 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                     meshRef.current.instanceColor.array[i * 3 + 1] = hoverColors.current[i * 3 + 1];
                     meshRef.current.instanceColor.array[i * 3 + 2] = hoverColors.current[i * 3 + 2];
                 }
-            } else {
+            } else if (originalColors.current) {
                 dummy.scale.setScalar(originalScale);
 
                 // Reset color if we have instance colors
