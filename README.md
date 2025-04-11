@@ -1,6 +1,6 @@
-Spring challenge
+# Spring challenge April 2025
 
-Blossoms on a river. /n
+Blossoms on a river with "wise" quotes.
 
 Demo: https://spring-challenge-gilt.vercel.app .
 
