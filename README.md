@@ -1,7 +1,7 @@
 Spring challenge
 
 Blossoms on a river.
-Demo on : spring-challenge-gilt.vercel.app
+Demo: spring-challenge-gilt.vercel.app
 press "L" for shader and Post-processing controls
 - water shader (https://dgreenheck.github.io/threejs-water-shader/)
 - DoF Post processing
