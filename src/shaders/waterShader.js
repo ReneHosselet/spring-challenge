@@ -162,7 +162,7 @@ const defaultUniforms = {
   uWavesIterations: { value: 1.0 },
 
   // Color parameters
-  uOpacity: { value: 0.9 },
+  uOpacity: { value: 0.95 },
   uTroughColor: { value: [0.0, 0.1, 0.2] },
   uSurfaceColor: { value: [0.0, 0.4, 0.8] },
   uPeakColor: { value: [0.8, 0.9, 1.0] },

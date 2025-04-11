@@ -16,6 +16,7 @@
     "@types/three": "^0.175.0",
     "jquery": "^3.7.1",
     "leva": "^0.10.0",
+    "lodash": "^4.17.21",
     "postprocessing": "^6.37.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

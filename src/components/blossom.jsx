@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from 'react'
+import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { Html, useGLTF, useTexture } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { getElevation } from '../utils/waveUtils'
@@ -11,45 +11,41 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
     const { scene, raycaster, mouse, camera } = useThree()
     const blossomGLTF = useGLTF('/models/sakura.glb')
     const aoMap = useTexture('/AOMaps/AO.png')
+
+    // Refs for scene objects and calculations
     const waterMeshRef = useRef(null)
     const meshRef = useRef()
     const planeRef = useRef()
     const dummy = useMemo(() => new THREE.Object3D(), [])
 
-    // State to track which instances are being highlighted
-    const [highlightedIndices, setHighlightedIndices] = useState([])
-    // State to track raycast intersection point
-    const [intersectPoint, setIntersectPoint] = useState(null)
-    // State to track the selected blossom for quotes
-    const [selectedBlossomIndex, setSelectedBlossomIndex] = useState(null)
-    // State to track hoveredBlossom for showing author
-    const [hoveredBlossomIndex, setHoveredBlossomIndex] = useState(null)
-    // Position for the HTML element
-    const [htmlPosition, setHtmlPosition] = useState([0, 0, 0])
-    // State to control visibility of the HTML element
-    const [isHtmlVisible, setIsHtmlVisible] = useState(false)
+    // Use a single state object instead of multiple useState hooks
+    // This prevents unnecessary re-renders when only some values change
+    const [blossomState, setBlossomState] = useState({
+        highlightedIndices: [],
+        intersectPoint: null,
+        selectedBlossomIndex: null,
+        hoveredBlossomIndex: null,
+        htmlPosition: [0, 0, 0],
+        isHtmlVisible: false
+    })
 
-    // Store original colors to restore them when hover ends
-    const originalColors = useRef(null)
-    // Store custom colors for hover state
-    const hoverColors = useRef(null)
+    // Use refs for data that doesn't need to trigger renders
+    const blossomData = useRef({
+        positions: [],
+        floatSeeds: [],
+        rotationSpeeds: [],
+        scales: [],
+        originalScales: [],
+        originalColors: null,
+        hoverColors: null,
+        authors: []
+    })
 
-    const positions = useRef([])
-    const floatSeeds = useRef([])
-    const rotationSpeeds = useRef([])
-    const scales = useRef([])
-    const originalScales = useRef([])
-
-    // Store author names for each blossom
-    const blossomAuthors = useRef([])
-
-    // Extract authors from quotes
+    // Extract authors from quotes - memoized to avoid recalculation
     const authors = useMemo(() => {
-        // If quotesData is imported directly
         if (quotesData && quotesData.quotes) {
             return quotesData.quotes.map(item => item.author);
         }
-        // Fallback if import doesn't work
         return [
             "Thich Nhat Hanh", "Lao Tzu", "Bodhidharma", "Dogen",
             "Shunryu Suzuki", "Alan Watts", "Zen Proverb",
@@ -58,7 +54,7 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
     }, []);
 
     // Function to check if the new position is too close to existing ones
-    const isTooClose = (newPos, positions, minDistance = 2) => {
+    const isTooClose = useCallback((newPos, positions, minDistance = 2) => {
         for (let i = 0; i < positions.length; i++) {
             const existingPos = positions[i]
             if (newPos.distanceTo(existingPos) < minDistance) {
@@ -66,9 +62,9 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
             }
         }
         return false
-    }
+    }, [])
 
-    // Initialize instance data
+    // Initialize instance data - only run once
     useEffect(() => {
         const tempPositions = []
         const tempFloatSeeds = []
@@ -84,7 +80,7 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                     0,
                     (Math.random() - 0.5) * 150
                 )
-            } while (isTooClose(newPos, tempPositions)) // Ensure the new position is not too close
+            } while (isTooClose(newPos, tempPositions))
 
             tempPositions.push(newPos)
             tempFloatSeeds.push(Math.random() * 0.5 + 1)
@@ -93,20 +89,50 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
             tempScales.push(scale)
 
             // Assign an author to this blossom
-            // If there are more blossoms than authors, start repeating authors
             const authorIndex = i % authors.length
             tempAuthors.push(authors[authorIndex])
         }
 
-        positions.current = tempPositions
-        floatSeeds.current = tempFloatSeeds
-        rotationSpeeds.current = tempRotSpeeds
-        scales.current = tempScales
-        originalScales.current = [...tempScales]
-        blossomAuthors.current = tempAuthors
-    }, [amount, authors])
+        // Store all this data in the ref instead of separate refs
+        blossomData.current = {
+            ...blossomData.current,
+            positions: tempPositions,
+            floatSeeds: tempFloatSeeds,
+            rotationSpeeds: tempRotSpeeds,
+            scales: tempScales,
+            originalScales: [...tempScales],
+            authors: tempAuthors
+        }
 
-    // Apply AO map to the blossom material
+        // Initialize color arrays
+        const instanceColors = new Float32Array(amount * 3)
+        const origColors = new Float32Array(amount * 3)
+        const hoverColors = new Float32Array(amount * 3)
+
+        // Fill with default colors
+        for (let i = 0; i < amount; i++) {
+            // Original (white)
+            origColors[i * 3] = 1.0
+            origColors[i * 3 + 1] = 1.0
+            origColors[i * 3 + 2] = 1.0
+
+            // Copy to instance colors (initial state)
+            instanceColors[i * 3] = 1.0
+            instanceColors[i * 3 + 1] = 1.0
+            instanceColors[i * 3 + 2] = 1.0
+
+            // Hover colors (light pink)
+            hoverColors[i * 3] = 1.0      // R
+            hoverColors[i * 3 + 1] = 0.7  // G
+            hoverColors[i * 3 + 2] = 0.8  // B
+        }
+
+        blossomData.current.originalColors = origColors
+        blossomData.current.hoverColors = hoverColors
+
+    }, [amount, authors, isTooClose])
+
+    // Apply AO map to the blossom material - only run once
     useEffect(() => {
         blossomGLTF.scene.traverse((child) => {
             if (child.isMesh) {
@@ -119,7 +145,8 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
         })
     }, [blossomGLTF, aoMap])
 
-    const findWaterMesh = () => {
+    // Find water mesh only once
+    const findWaterMesh = useCallback(() => {
         if (waterMeshRef.current) return
         scene.traverse((object) => {
             if (
@@ -130,7 +157,7 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                 waterMeshRef.current = object
             }
         })
-    }
+    }, [scene])
 
     useEffect(() => {
         findWaterMesh()
@@ -139,117 +166,168 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
             if (waterMeshRef.current) clearInterval(intervalId)
         }, 500)
         return () => clearInterval(intervalId)
-    }, [scene])
+    }, [findWaterMesh])
 
-    // Setup color arrays for hover effect
-    useEffect(() => {
-        if (!meshRef.current || !meshRef.current.instanceColor) {
-            // Initialize instanceColor if it doesn't exist yet
-            if (meshRef.current && !meshRef.current.instanceColor) {
-                const instanceColors = new Float32Array(amount * 3);
-
-                // Set default colors (white)
-                for (let i = 0; i < amount; i++) {
-                    instanceColors[i * 3] = 1.0;     // R
-                    instanceColors[i * 3 + 1] = 1.0; // G
-                    instanceColors[i * 3 + 2] = 1.0; // B
-                }
-                // Store original colors
-                if (!originalColors.current) {
-                    originalColors.current = new Float32Array(amount * 3);
-                    for (let i = 0; i < amount * 3; i++) {
-                        originalColors.current[i] = 1.0; // Default white color
-                    }
-                }
-
-                // Create hover colors (light pink for sakura blossoms)
-                if (!hoverColors.current) {
-                    hoverColors.current = new Float32Array(amount * 3);
-                    for (let i = 0; i < amount; i++) {
-                        hoverColors.current[i * 3] = 1.0;     // R (pink tint)
-                        hoverColors.current[i * 3 + 1] = 0.7; // G (reduced for pink)
-                        hoverColors.current[i * 3 + 2] = 0.8; // B (slight blue for pink)
-                    }
-                }
-                meshRef.current.instanceColor = new THREE.InstancedBufferAttribute(instanceColors, 3);
+    // Extract geometry and material from GLTF - memoized to prevent recreation
+    const geometry = useMemo(() => {
+        let geom = null
+        blossomGLTF.scene.traverse((child) => {
+            if (child.isMesh && !geom) {
+                geom = child.geometry.clone()
             }
-            return;
-        }
+        })
+        return geom
+    }, [blossomGLTF])
 
-        // Store original colors
-        if (!originalColors.current) {
-            originalColors.current = new Float32Array(amount * 3);
-            for (let i = 0; i < amount * 3; i++) {
-                originalColors.current[i] = 1.0; // Default white color
+    const material = useMemo(() => {
+        let mat = null
+        blossomGLTF.scene.traverse((child) => {
+            if (child.isMesh && !mat) {
+                mat = child.material.clone()
+                mat.vertexColors = true
             }
-        }
+        })
+        return mat
+    }, [blossomGLTF])
 
-        // Create hover colors (light pink for sakura blossoms)
-        if (!hoverColors.current) {
-            hoverColors.current = new Float32Array(amount * 3);
-            for (let i = 0; i < amount; i++) {
-                hoverColors.current[i * 3] = 1.0;     // R (pink tint)
-                hoverColors.current[i * 3 + 1] = 0.7; // G (reduced for pink)
-                hoverColors.current[i * 3 + 2] = 0.8; // B (slight blue for pink)
-            }
+    // Find quote by author - memoized to avoid recalculation
+    const quotesByAuthor = useMemo(() => {
+        const quoteMap = {}
+        if (quotesData && quotesData.quotes) {
+            quotesData.quotes.forEach(q => {
+                quoteMap[q.author] = q.quote
+            })
         }
-    }, [amount, meshRef]);
+        return quoteMap
+    }, [])
 
-    // Check which blossoms are within radius of intersection point
-    const updateHighlightedBlossoms = () => {
+    // Optimized update of highlighted blossoms - moved outside of render loop
+    const updateHighlightedBlossoms = useCallback((intersectPoint) => {
         if (!intersectPoint) {
-            setHighlightedIndices([]);
-            setHoveredBlossomIndex(null);
-            setIsHtmlVisible(selectedBlossomIndex !== null);
-            return;
+            setBlossomState(prev => ({
+                ...prev,
+                highlightedIndices: [],
+                hoveredBlossomIndex: null,
+                // Only show HTML if something is selected
+                isHtmlVisible: prev.selectedBlossomIndex !== null
+            }))
+            return
         }
 
-        const newHighlightedIndices = [];
-        let closestIndex = -1;
-        let closestDistSq = Infinity;
+        const { positions } = blossomData.current
+        const newHighlightedIndices = []
+        let closestIndex = -1
+        let closestDistSq = Infinity
 
-        // Check each blossom's distance to the intersection point (only checking x and z)
         for (let i = 0; i < amount; i++) {
-            const pos = positions.current[i];
+            const pos = positions[i]
 
-            // Calculate distance in x-z plane (ignoring y)
-            const dx = pos.x - intersectPoint.x;
-            const dz = pos.z - intersectPoint.z;
-            const distanceSquared = dx * dx + dz * dz;
+            const dx = pos.x - intersectPoint.x
+            const dz = pos.z - intersectPoint.z
+            const distanceSquared = dx * dx + dz * dz
 
-            // If within radius, add to highlighted indices
             if (distanceSquared <= highlightRadius * highlightRadius) {
-                newHighlightedIndices.push(i);
+                newHighlightedIndices.push(i)
 
-                // Track the closest blossom for hover
                 if (distanceSquared < closestDistSq) {
-                    closestDistSq = distanceSquared;
-                    closestIndex = i;
+                    closestDistSq = distanceSquared
+                    closestIndex = i
                 }
             }
         }
 
-        setHighlightedIndices(newHighlightedIndices);
+        setBlossomState(prev => {
+            // If there's a selected blossom, keep the HTML position on it
+            // Only update HTML position if nothing is selected
+            let newHtmlPosition = prev.htmlPosition
+            let newIsHtmlVisible = prev.isHtmlVisible
 
-        // Update the hovered blossom index and HTML position
-        if (closestIndex !== -1) {
-            setHoveredBlossomIndex(closestIndex);
+            if (prev.selectedBlossomIndex !== null) {
+                // If something is selected, keep the HTML visible and positioned at the selected blossom
+                const selectedPos = positions[prev.selectedBlossomIndex]
+                newHtmlPosition = [selectedPos.x, selectedPos.y + 1.5, selectedPos.z]
+                newIsHtmlVisible = true
+            } else if (closestIndex !== -1) {
+                // Nothing selected, but hovering over a blossom
+                const blossomPos = positions[closestIndex]
+                newHtmlPosition = [blossomPos.x, blossomPos.y + 1.5, blossomPos.z]
+                newIsHtmlVisible = true
+            } else {
+                // Nothing selected or hovered
+                newIsHtmlVisible = false
+            }
 
-            // Compute position for the HTML element (above the blossom)
-            const blossomPos = positions.current[closestIndex];
-            setHtmlPosition([blossomPos.x, blossomPos.y + 1.5, blossomPos.z]); // Position it 1.5 units above the blossom
-            setIsHtmlVisible(true);
+            return {
+                ...prev,
+                highlightedIndices: newHighlightedIndices,
+                hoveredBlossomIndex: prev.selectedBlossomIndex === null ? closestIndex : null,
+                htmlPosition: newHtmlPosition,
+                isHtmlVisible: newIsHtmlVisible
+            }
+        })
+    }, [amount, highlightRadius])
+
+    // Optimized plane click handler - batches state updates
+    const handlePlaneClick = useCallback((event) => {
+        event.stopPropagation()
+
+        const { highlightedIndices, intersectPoint, selectedBlossomIndex } = blossomState
+        const { positions } = blossomData.current
+
+        if (highlightedIndices.length > 0 && intersectPoint) {
+            let closestIndex = -1
+            let closestDistSq = Infinity
+
+            for (const idx of highlightedIndices) {
+                const pos = positions[idx]
+                const dx = pos.x - intersectPoint.x
+                const dz = pos.z - intersectPoint.z
+                const distSq = dx * dx + dz * dz
+
+                if (distSq < closestDistSq) {
+                    closestDistSq = distSq
+                    closestIndex = idx
+                }
+            }
+
+            if (closestIndex !== -1) {
+                // Toggle selection
+                const newSelectedIndex = selectedBlossomIndex === closestIndex ? null : closestIndex
+
+                // Update HTML position if needed
+                let newHtmlPosition = blossomState.htmlPosition
+                if (newSelectedIndex !== null) {
+                    const blossomPos = positions[newSelectedIndex]
+                    newHtmlPosition = [blossomPos.x, blossomPos.y + 1.5, blossomPos.z]
+                }
+
+                setBlossomState(prev => ({
+                    ...prev,
+                    selectedBlossomIndex: newSelectedIndex,
+                    htmlPosition: newHtmlPosition,
+                    isHtmlVisible: newSelectedIndex !== null
+                }))
+            }
         } else {
-            setHoveredBlossomIndex(null);
-            setIsHtmlVisible(selectedBlossomIndex !== null);
+            // Clicked on empty space - clear selection
+            setBlossomState(prev => ({
+                ...prev,
+                selectedBlossomIndex: null,
+                isHtmlVisible: false
+            }))
         }
-    }
+    }, [blossomState])
 
-    // Animate blossoms and handle highlighting
+    // Throttle for raycasting operations to reduce performance impact
+    const raycastThrottleRef = useRef({ lastTime: 0, throttleInterval: 50 })
+
+    // Main animation loop - optimized to reduce calculations
     useFrame((state) => {
-        if (!meshRef.current) return;
+        if (!meshRef.current) return
 
-        const time = state.clock.elapsedTime;
+        const time = state.clock.elapsedTime
+
+        // Check if water mesh exists and has the required properties
         const waveParams = waterMeshRef.current?.material?.uniforms && {
             wavesAmplitude: waterMeshRef.current.material.uniforms.uWavesAmplitude.value,
             wavesSpeed: waterMeshRef.current.material.uniforms.uWavesSpeed.value,
@@ -258,183 +336,128 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
             wavesLacunarity: waterMeshRef.current.material.uniforms.uWavesLacunarity.value,
             wavesIterations: waterMeshRef.current.material.uniforms.uWavesIterations.value,
             time
-        };
+        }
 
-        if (!waveParams) return;
+        if (!waveParams) return
 
-        // Handle raycasting for detecting plane intersection
-        raycaster.setFromCamera(mouse, camera);
+        // Throttle raycasting to improve performance
+        const currentTime = state.clock.elapsedTime * 1000 // Convert to ms
+        if (currentTime - raycastThrottleRef.current.lastTime > raycastThrottleRef.current.throttleInterval) {
+            raycastThrottleRef.current.lastTime = currentTime
 
-        // Check for intersection with the invisible plane
-        if (planeRef.current) {
-            const planeIntersects = raycaster.intersectObject(planeRef.current);
+            // Handle raycasting for detecting plane intersection
+            raycaster.setFromCamera(mouse, camera)
 
-            if (planeIntersects.length > 0) {
-                setIntersectPoint(planeIntersects[0].point);
-                updateHighlightedBlossoms();
-            } else {
-                setIntersectPoint(null);
-                setHighlightedIndices([]);
-                setHoveredBlossomIndex(null);
-                setIsHtmlVisible(selectedBlossomIndex !== null);
+            // Check for intersection with the invisible plane
+            if (planeRef.current) {
+                const planeIntersects = raycaster.intersectObject(planeRef.current)
+
+                if (planeIntersects.length > 0) {
+                    const newIntersectPoint = planeIntersects[0].point
+                    setBlossomState(prev => ({ ...prev, intersectPoint: newIntersectPoint }))
+                    updateHighlightedBlossoms(newIntersectPoint)
+                } else {
+                    setBlossomState(prev => ({ ...prev, intersectPoint: null }))
+                    updateHighlightedBlossoms(null)
+                }
             }
         }
 
         // Update HTML position if selected blossom exists
-        if (selectedBlossomIndex !== null) {
-            const selectedPos = positions.current[selectedBlossomIndex];
-            setHtmlPosition([selectedPos.x, selectedPos.y + 1.5, selectedPos.z]);
+        if (blossomState.selectedBlossomIndex !== null) {
+            const selectedPos = blossomData.current.positions[blossomState.selectedBlossomIndex]
+            const newPosition = [selectedPos.x, selectedPos.y + 1.5, selectedPos.z]
+
+            // Only update if position changed significantly (avoid unnecessary re-renders)
+            const currentPos = blossomState.htmlPosition
+            const dx = currentPos[0] - newPosition[0]
+            const dy = currentPos[1] - newPosition[1]
+            const dz = currentPos[2] - newPosition[2]
+            const distSq = dx * dx + dy * dy + dz * dz
+
+            if (distSq > 0.01) {
+                setBlossomState(prev => ({ ...prev, htmlPosition: newPosition }))
+            }
         }
+
+        // Get local refs to data for performance
+        const {
+            positions, floatSeeds, rotationSpeeds,
+            originalScales, originalColors, hoverColors
+        } = blossomData.current
+
+        const { highlightedIndices, selectedBlossomIndex } = blossomState
 
         // Update instance positions and rotations
         for (let i = 0; i < amount; i++) {
-            const pos = positions.current[i];
-            const floatSeed = floatSeeds.current[i];
-            const rotSpeed = rotationSpeeds.current[i];
-            const originalScale = originalScales.current[i];
+            const pos = positions[i]
+            const floatSeed = floatSeeds[i]
+            const rotSpeed = rotationSpeeds[i]
+            const originalScale = originalScales[i]
 
-            const speed = 0.005 * waveParams.wavesSpeed * floatSeed;
-            pos.x -= speed;
-            pos.z -= speed;
+            const speed = 0.005 * waveParams.wavesSpeed * floatSeed
+            pos.x -= speed * 1.5
+            pos.z -= speed * 1.5
 
-            if (pos.x < -100) pos.x = 80;
-            if (pos.z < -100) pos.z = 80;
+            if (pos.x < -100) pos.x = 80
+            if (pos.z < -100) pos.z = 80
 
-            const elevation = getElevation(pos.x, pos.z, waveParams);
-            pos.y = (elevation * 5) + 0.35;
+            const elevation = getElevation(pos.x, pos.z, waveParams)
+            pos.y = (elevation * 5) + 0.35
 
-            dummy.position.copy(pos);
+            dummy.position.copy(pos)
             dummy.rotation.set(
                 Math.PI / 2,
                 0,
                 (time * rotSpeed * 50)
-            );
+            )
 
-            // If this is a highlighted instance or the selected instance, make it larger
-            const isHighlighted = highlightedIndices.includes(i);
-            const isSelected = selectedBlossomIndex === i;
+            // Check if this instance needs special treatment
+            const isSelected = selectedBlossomIndex === i
+            const isHighlighted = highlightedIndices.includes(i)
+
             if (isSelected) {
-                // Selected blossoms are larger and have a different color
-                dummy.scale.setScalar(originalScale * 1.5);
+                dummy.scale.setScalar(originalScale * 1.5)
 
                 if (meshRef.current.instanceColor) {
-                    // Make selected blossom more vibrant pink
-                    meshRef.current.instanceColor.array[i * 3] = 1.0;         // R
-                    meshRef.current.instanceColor.array[i * 3 + 1] = 0.5;     // G
-                    meshRef.current.instanceColor.array[i * 3 + 2] = 0.7;     // B
+                    meshRef.current.instanceColor.array[i * 3] = 1.0
+                    meshRef.current.instanceColor.array[i * 3 + 1] = 0.5
+                    meshRef.current.instanceColor.array[i * 3 + 2] = 0.7
                 }
-            } else if (isHighlighted && hoverColors.current) {
-                dummy.scale.setScalar(originalScale * 1.2); // 20% bigger when highlighted
+            } else if (isHighlighted && hoverColors) {
+                dummy.scale.setScalar(originalScale * 1.2)
 
-                // Update color if we have instance colors
                 if (meshRef.current.instanceColor) {
-                    meshRef.current.instanceColor.array[i * 3] = hoverColors.current[i * 3];
-                    meshRef.current.instanceColor.array[i * 3 + 1] = hoverColors.current[i * 3 + 1];
-                    meshRef.current.instanceColor.array[i * 3 + 2] = hoverColors.current[i * 3 + 2];
+                    meshRef.current.instanceColor.array[i * 3] = hoverColors[i * 3]
+                    meshRef.current.instanceColor.array[i * 3 + 1] = hoverColors[i * 3 + 1]
+                    meshRef.current.instanceColor.array[i * 3 + 2] = hoverColors[i * 3 + 2]
                 }
-            } else if (originalColors.current) {
-                dummy.scale.setScalar(originalScale);
+            } else if (originalColors) {
+                dummy.scale.setScalar(originalScale)
 
-                // Reset color if we have instance colors
                 if (meshRef.current.instanceColor) {
-                    meshRef.current.instanceColor.array[i * 3] = originalColors.current[i * 3];
-                    meshRef.current.instanceColor.array[i * 3 + 1] = originalColors.current[i * 3 + 1];
-                    meshRef.current.instanceColor.array[i * 3 + 2] = originalColors.current[i * 3 + 2];
+                    meshRef.current.instanceColor.array[i * 3] = originalColors[i * 3]
+                    meshRef.current.instanceColor.array[i * 3 + 1] = originalColors[i * 3 + 1]
+                    meshRef.current.instanceColor.array[i * 3 + 2] = originalColors[i * 3 + 2]
                 }
             }
 
-            dummy.updateMatrix();
-            meshRef.current.setMatrixAt(i, dummy.matrix);
+            dummy.updateMatrix()
+            meshRef.current.setMatrixAt(i, dummy.matrix)
         }
 
-        meshRef.current.instanceMatrix.needsUpdate = true;
+        // Update instance data
+        meshRef.current.instanceMatrix.needsUpdate = true
         if (meshRef.current.instanceColor) {
-            meshRef.current.instanceColor.needsUpdate = true;
+            meshRef.current.instanceColor.needsUpdate = true
         }
-    });
-
-    // Extract geometry and material from GLTF
-    const geometry = useMemo(() => {
-        let geom = null;
-        blossomGLTF.scene.traverse((child) => {
-            if (child.isMesh && !geom) {
-                geom = child.geometry.clone();
-            }
-        });
-        return geom;
-    }, [blossomGLTF]);
-
-    const material = useMemo(() => {
-        let mat = null;
-        blossomGLTF.scene.traverse((child) => {
-            if (child.isMesh && !mat) {
-                mat = child.material.clone();
-
-                // Make sure the material can show instance colors
-                mat.vertexColors = true;
-            }
-        });
-        return mat;
-    }, [blossomGLTF]);
-
-    // Find the quote for a given author
-    const findQuoteByAuthor = (author) => {
-        if (quotesData && quotesData.quotes) {
-            const quoteObj = quotesData.quotes.find(q => q.author === author);
-            return quoteObj ? quoteObj.quote : "No quote found";
-        }
-        return "Quote data not available";
-    };
-
-    // Handle click on the invisible plane
-    const handlePlaneClick = (event) => {
-        // Prevent the default behavior to avoid any issues
-        event.stopPropagation();
-
-        if (highlightedIndices.length > 0) {
-            // Find the closest blossom to the intersection point
-            if (intersectPoint) {
-                let closestIndex = -1;
-                let closestDistSq = Infinity;
-
-                for (const idx of highlightedIndices) {
-                    const pos = positions.current[idx];
-                    const dx = pos.x - intersectPoint.x;
-                    const dz = pos.z - intersectPoint.z;
-                    const distSq = dx * dx + dz * dz;
-
-                    if (distSq < closestDistSq) {
-                        closestDistSq = distSq;
-                        closestIndex = idx;
-                    }
-                }
-
-                if (closestIndex !== -1) {
-                    // Toggle selection - if already selected, deselect it
-                    if (selectedBlossomIndex === closestIndex) {
-                        setSelectedBlossomIndex(null);
-                    } else {
-                        setSelectedBlossomIndex(closestIndex);
-
-                        // Update HTML position
-                        const blossomPos = positions.current[closestIndex];
-                        setHtmlPosition([blossomPos.x, blossomPos.y + 1.5, blossomPos.z]);
-                    }
-                    setIsHtmlVisible(selectedBlossomIndex !== closestIndex);
-                }
-            }
-        } else {
-            // Clicked on empty space - clear selection
-            setSelectedBlossomIndex(null);
-            setIsHtmlVisible(false);
-        }
-    };
+    })
 
     return (
         <>
             {/* HTML display for author/quote */}
-            {isHtmlVisible && (
-                <Html position={htmlPosition} center distanceFactor={50}>
+            {blossomState.isHtmlVisible && (
+                <Html position={blossomState.htmlPosition} center distanceFactor={50}>
                     <div style={{
                         backgroundColor: 'rgba(255, 255, 255, 0.85)',
                         borderRadius: '8px',
@@ -443,35 +466,35 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                         boxShadow: '0 2px 10px rgba(0, 0, 0, 0.2)',
                         width: '250px',
                         transform: 'translateY(-50%)',
-                        pointerEvents: 'none', // Prevent the HTML from blocking raycasts
+                        pointerEvents: 'none',
                     }}>
-                        {selectedBlossomIndex !== null ? (
-                            // Show quote when selected
+                        {blossomState.selectedBlossomIndex !== null ? (
+                            // Show quote when selected - priority display
                             <div>
                                 <div style={{
                                     fontSize: '16px',
                                     fontWeight: 'bold',
                                     marginBottom: '8px',
-                                    color: '#d57e9c' // Pink color for the author name
+                                    color: '#d57e9c'
                                 }}>
-                                    {blossomAuthors.current[selectedBlossomIndex]}
+                                    {blossomData.current.authors[blossomState.selectedBlossomIndex]}
                                 </div>
                                 <div style={{
                                     fontStyle: 'italic',
                                     fontSize: '14px',
                                     color: '#333'
                                 }}>
-                                    "{findQuoteByAuthor(blossomAuthors.current[selectedBlossomIndex])}"
+                                    "{quotesByAuthor[blossomData.current.authors[blossomState.selectedBlossomIndex]] || "No quote found"}"
                                 </div>
                             </div>
-                        ) : hoveredBlossomIndex !== null ? (
-                            // Show just author when hovered
+                        ) : blossomState.hoveredBlossomIndex !== null ? (
+                            // Only show hover content when nothing is selected
                             <div style={{
                                 fontSize: '16px',
                                 fontWeight: 'bold',
-                                color: '#d57e9c' // Pink color for the author name
+                                color: '#d57e9c'
                             }}>
-                                {blossomAuthors.current[hoveredBlossomIndex]}
+                                {blossomData.current.authors[blossomState.hoveredBlossomIndex]}
                             </div>
                         ) : null}
                     </div>
@@ -491,13 +514,13 @@ function Blossom({ amount = 10, highlightRadius = 5 }) {
                 rotation={[-Math.PI / 2, 0, 0]}
                 position={[0, 0, 0]}
                 onClick={handlePlaneClick}
-                visible={false} // Make it invisible
+                visible={false}
             >
                 <planeGeometry args={[300, 300]} />
                 <meshBasicMaterial transparent opacity={0} />
             </mesh>
         </>
-    );
+    )
 }
 
-export default Blossom;
+export default Blossom
